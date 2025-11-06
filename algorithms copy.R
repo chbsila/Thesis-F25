@@ -60,21 +60,26 @@ apply_cuts <- function(results, trust_matrix, r, max_cuts_per_process, punishmen
     names(sigmas) <- ids
     
     # Naive Approach: top_ids <- as.numeric(names(sort(sigmas, decreasing = TRUE))[1:max_cuts_per_process])
+    sigmas <- (sigmas-min(sigmas))/(max(sigmas)-min(sigmas))
     
     # Inverse Gamma Approach
     
-    alpha <- 3
-    beta <- 2
+    #alpha <- 5
+
+    #beta <- 5
     
-    trust_probabilities <- pgamma(1 / sigmas, shape = alpha, rate = 1 / beta)
-    names(trust_probabilities) <- ids
+    #trust_probabilities <- pgamma(1 / sigmas, shape = alpha, rate = 1 / beta)
+    #names(trust_probabilities) <- ids
   
     # Stochastic and Dynamic with second chances
-    for (k in 1:ncol(trust_matrix)) {
-      if (k %in% names(trust_probabilities)) {
+    #for (k in 1:ncol(trust_matrix)) {
+      #if (k %in% names(trust_probabilities)) {
         # Punishment approach: trust_matrix[i, k] <- trust_matrix[i, k] * punishment
-        trust_matrix[i,k] <- trust_probabilities[as.character(k)] # Needs to be a little more sophisticated 
-      } 
+        #trust_matrix[i,k] <- trust_probabilities[as.character(k)] # Needs to be a little more sophisticated 
+      #} 
+    for (k in 1:ncol(trust_matrix)) {
+      if (k %in% names(sigmas)) {
+      trust_matrix[i,k] <- 1 - sigmas[as.character(k)] }
       else {
         trust_matrix[i, k] <- min(1, trust_matrix[i, k] + recovery_rate) 
       } 
@@ -86,7 +91,6 @@ apply_cuts <- function(results, trust_matrix, r, max_cuts_per_process, punishmen
 }
 
 # TO DO: different intersection model + building trust up 
-# + more mathematically sophisticated way of computing trust
 
 sim_round <- function(r, n_good_received = 101, trust_matrix) {
   # ```
@@ -178,4 +182,3 @@ sim_rounds <- function(r, n_good_received = 101, number_of_rounds = 5,
   
   return(history)
 }
-
