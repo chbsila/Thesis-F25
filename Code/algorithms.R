@@ -8,9 +8,7 @@ rank_aggregation <- function(r) {
   )
 }
 
-sim <- function(n_items,
-                n_processes,
-                rho=0.5){
+sim <- function(n_items, n_processes, rho=0.5){
   # ```
   # This function simulates ranked lists from the latent variable model proposed
   # by Wang et al. (2025). For now, let's focus on fully ranked lists first.
@@ -36,11 +34,10 @@ sim <- function(n_items,
   return(list(r=r,true_rank=true_rank))
 }
 
-
 sim_ranking <- function(n_good, n_bad, n_items) {
   # ```
   # This function simulates a batch of good ranking and a batch of
-  # byzantine ranking. All the byzantine rankings collude with each other.
+  # byzantine ranking. All the byzantine rankings might collude with each other.
   
   # (int) n_good: Total number of good processes
   # (int) n_bad: Total number of bad processes.
@@ -51,116 +48,139 @@ sim_ranking <- function(n_good, n_bad, n_items) {
   return(list("good" = good, "bad" = bad))
 }
 
-# Double check the intersection model is implemented correctly 
-
-intersection_model_B <- function(n_good, n_bad){
+intersection_model_A <- function(n_good, n_bad){
+  # ```
+  # This function constructs intersection model A.
+  # Each good process hears from itself, all t Byzantine processes and (n - 2t - 1) other good processes 
+  # sampled uniformly at random
+  
+  # (int) n_good: Total number of good processes.
+  # (int) n_bad: Total number of Byzantine processes.
+  
+  # network[i, j] = 1 means good receiver i receives a message from sender j.
   
   n <- n_good + n_bad
   t <- n_bad
   good_ids <- 1:n_good
+  byzantine_ids <- (n_good+1):n
+  network <- matrix(0, nrow = n_good, ncol = n)
   
-  # table[i, j] = 1 means good receiver i will receive a message from j
-  table <- matrix(0, nrow = n_good, ncol = n)
-  
-  # Each process P_i samples n - t total including itself
-  
-  sample_size <- (n - t - 1) # other than itself
-
-  for (i in good_ids) {
-    
-    table[i, i] <- 1  # M = {i}
-    
-    candidates <- setdiff(1:n, i) 
-    
-    S_i <- sample(candidates, sample_size) # uniformly at random (Or should it be the same processes?)
-    
-    for (s in S_i) {
-    
-      table[i, s] <- 1  # M = M \union {P_s}
-      good_candidates <- setdiff(good_ids, i)
-      
-      table[i, sample(good_ids, t)] <- 1   # M = M \union {t good processes at random}
+  for (i in good_ids){
+    network[i, i] <- 1
+    network[i, sample(setdiff(good_ids, i), n-2*t-1)] <- 1   # n-2t-1 good processes at random
+    for (j in byzantine_ids){
+      network[i,j] <- 1 # Byzantine inputs are always present 
     }
   }
-  return(table)
+  return(network)
 }
 
-sim_round <- function(r, table) {
+intersection_model_B <- function(n_good, n_bad){
   # ```
-  # This function simulates a round of communication using intersection model B.
-  # (list) r: Input rankings globally
-  # (list) table: Pre-computed communication network/intersection
+  # This function constructs intersection model B.
+  # TO DO: EXPLAIN
   
+  # (int) n_good: Total number of good processes.
+  # (int) n_bad: Total number of Byzantine processes.
+
+  # network[i, j] = 1 means good receiver i receives a message from sender j.
   
-  results <- list()
-  
-  # Good process: They do legit rank aggregation on messages received
-  for (i in 1:ncol(r$good$r)) { 
-    r_all <- cbind(r$good$r, r$bad$r)  
-    ids_used <- which(table[i, ] == 1)  # Pre-selected communication intersection B
-    r_heard <- r_all[, ids_used, drop=FALSE]  
-    results[[i]] <- list()
-    results[[i]][["id_good"]] <- i
-    results[[i]][["ids_used"]] <- ids_used      
-    results[[i]][["ra"]] <- rank_aggregation(r_heard)
-    results[[i]][["posterior_ranking"]] <- rank(-results[[i]]$ra$mu) 
+  n <- n_good + n_bad
+  t <- n_bad
+  good_ids <- 1:n_good
+  network <- matrix(0, nrow = n_good, ncol = n)
+  # Each process P_i samples n - t total including itself
+  sample_size <- (n - t - 1) # other than itself
+  for (i in good_ids) {
+    network[i, i] <- 1  # M = {i}
+    candidates <- setdiff(1:n, i) 
+    S_i <- sample(candidates, sample_size) # uniformly at random 
+    for (s in S_i) {
+      network[i, s] <- 1  # M = M \union {P_s}
+      good_candidates <- setdiff(good_ids, i)
+      network[i, sample(good_ids, t)] <- 1   # M = M \union {t good processes at random}
+    }
   }
-  
-  # Bad process: They generate garbage 
-  for (j in 1:ncol(r$bad$r)) {
-    results[[ncol(r$good$r) + j]] <- list()
-    results[[ncol(r$good$r) + j]][["id_good"]] <- NULL
-    results[[ncol(r$good$r) + j]][["ids_used"]] <- NULL  
-    results[[ncol(r$good$r) + j]][["ra"]] <- NULL
-    results[[ncol(r$good$r) + j]][["posterior_ranking"]] <- sample(1:nrow(r$bad$r)) #random
-  }
-  
-  return(list(results = results))
+  return(network)
 }
 
-# This method simulates multiple rounds with the new algorithm
-# NOT FINISHED
-
-sim_rounds <- function(r, number_of_rounds, trust_vector) {
+intersection_model_C <- function(n_good, n_bad) {
+  # ```
+  # This function constructs intersection model C.
+  # We build nested super sets A_1, A_2, ..., A_{t+1}, where:
+  # |A_1| = n-t and each A_{k+1} adds one new process from the remainder
+  # Then, each good process selects one A_k uniformly at random and hears from
+  # all processes in that super set.
   
-  history <- list()
+  # (int) n_good: Total number of good processes.
+  # (int) n_bad: Total number of bad (Byzantine) processes.
   
-  n_good <- ncol(r$good$r)
-  n_bad  <- ncol(r$bad$r)
+  # network[i, j] = 1 means good receiver i receives a message from sender j.
+  
   n <- n_good + n_bad
+  t <- n_bad
+  good_ids <- 1:n_good
+  bad_ids  <- (n_good + 1):n
+  all_ids <- 1:n
+  network <- matrix(0, nrow = n_good, ncol = n)
+  A_sets <- vector("list", t + 1)
+  A_sets[[1]] <- sample(all_ids, n-t)
+  remainder <- setdiff(all_ids, A_sets[[1]])
   
-  r_all <- cbind(r$good$r, r$bad$r)
+  remainder <- sample(remainder, t)  # randomize order
   
-  # Reservoir of each good good process i, store ids of processes whose rankings are kept
-  reservoir <- vector("list", n_good)
-  
-  for (i in 1:n_good){
-  reservoir[[i]] <- i 
-  } 
-  
-  # Trust vector: Using a point system, a process gets a point every time its opinion is trusted by another process
-  if (is.null(trust_vector)) {
-    trust_vector = rep(0,n)
+  for (k in 2:(t + 1)) {
+    A_sets[[k]] <- c(A_sets[[k - 1]], remainder[k - 1])
   }
   
-  for (j in 1:number_of_rounds) {
+  # Assign each good process a random superset and fill the network 
+  membership <- sample(1:(t + 1), size = n_good, replace = TRUE)
+  for (i in 1:n_good) {
+    heard_from <- A_sets[[membership[i]]]
+    network[i, heard_from] <- 1
+  }
+  
+  return(network)
+}
+
+sim_round <- function(r, network) {
+  # ```
+  # This function simulates a round of communication given a network configuration.
+  # (matrix) r_all: Matrix of rankings (good + bad) used in this round
+  # (matrix) network: Pre-computed communication network/intersection
+  # (integer) n_good: number of good processes
+  # (integer) n_bad: number of bad processes
+
+    n_good <- ncol(r$good$r)
+    n_bad  <- ncol(r$bad$r)
+    r_all  <- cbind(r$good$r, r$bad$r)
     
-    # New communication intersection/network each round
-    table <- intersection_model_B(n_good, n_bad)
-    results <- sim_round(r, table)
+    results <- list()
+    trust_matrix <- matrix(0, nrow = n_good, ncol = n_good + n_bad)
     
-    # TO DO: Update reservoirs
-    for (i in 1:n_good) {
-      # TO DO: use sigmas to determine which ones to add or to ignore for this round
-      # TO DO: update trust vector
-      # TO DO : Recompute aggregation using the full reservoir
-      # TO DO: Check if change in "information" is significant
+    # Good processes
+    for (i in 1:n_good) { 
+      ids_used <- which(network[i, ] == 1)
+      r_heard <- r_all[, ids_used, drop = FALSE]
+      
+      results[[i]] <- list()
+      results[[i]][["id_good"]] <- i
+      results[[i]][["ids_used"]] <- ids_used
+      results[[i]][["ra"]] <- rank_aggregation(r_heard)
+      results[[i]][["posterior_ranking"]] <- rank(-results[[i]]$ra$mu)
+      
+      sigmas <- results[[i]]$ra$sigma2
+      sigmas <- (sigmas - min(sigmas)) / (max(sigmas) - min(sigmas))
+      trust_matrix[i, ids_used] <- 1 - sigmas
     }
     
-    history[[j]] <- list(results = results, trust_vector = trust_vector, table = table, reservoir = reservoir)
+    # Bad processes
+    for (j in 1:n_bad) {
+      idx <- n_good + j
+      results[[idx]] <- list()
+      results[[idx]][["posterior_ranking"]] <- sample(1:nrow(r_all))
+    }
+    
+    return(list(results = results, trust_matrix = trust_matrix))
   }
   
-  return(history)
-}
-
-
