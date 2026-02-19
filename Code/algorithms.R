@@ -146,7 +146,7 @@ intersection_model_C <- function(n_good, n_bad) {
 sim_round <- function(r, network) {
   # ```
   # This function simulates a round of communication given a network configuration.
-  # (matrix) r_all: Matrix of rankings (good + bad) used in this round
+  # (matrix) r: Matrix of rankings (good + bad) used in this round
   # (matrix) network: Pre-computed communication network/intersection
   # (integer) n_good: number of good processes
   # (integer) n_bad: number of bad processes
@@ -182,5 +182,92 @@ sim_round <- function(r, network) {
     }
     
     return(list(results = results, trust_matrix = trust_matrix))
+}
+
+kendall_tau <- function(true_rank, estimated_rank) {
+  cor(true_rank, estimated_rank, method = "kendall")
+}
+
+spearman_corr <- function(true_rank, estimated_rank) {
+  cor(true_rank, estimated_rank, method = "spearman")
+}
+
+sim_rounds <- function(r,
+                       number_of_rounds,
+                       intersection,
+                       k) {
+  
+  n_good <- ncol(r$good$r)
+  n_bad  <- ncol(r$bad$r)
+  n_processes <- n_good + n_bad
+  
+  r_original <- cbind(r$good$r, r$bad$r)
+  r_all <- r_original
+  
+  col_process_id <- 1:n_processes
+  
+  duplication_count <- rep(0, n_processes)
+  
+  avg_tau_true <- numeric(number_of_rounds)
+  avg_spear_true <- numeric(number_of_rounds)
+  
+  for (round in 1:number_of_rounds) {
+    
+    if (intersection == "A") network <- intersection_model_A(n_good, n_bad)
+    if (intersection == "B") network <- intersection_model_B(n_good, n_bad)
+    if (intersection == "C") network <- intersection_model_C(n_good, n_bad)
+    
+    tau_true <- numeric(n_good)
+    spear_true <- numeric(n_good)
+    
+    for (i in 1:n_good) {
+      
+      ids_used <- which(network[i, ] == 1)
+      
+      # Suggested rankings from processes heard
+      r_new <- r_original[, ids_used, drop = FALSE]
+      
+      # Run BiGER on everything so far + new suggestions
+      r_combined <- cbind(r_all, r_new)
+      
+      ra <- rank_aggregation(r_combined)
+      post_now <- rank(-ra$mu)
+      sigmas <- ra$sigma2
+      
+      # Normalize 
+
+      sigmas_norm <- (sigmas - min(sigmas)) / (max(sigmas) - min(sigmas))
+      trust_cols <- 1 - sigmas_norm
+    
+      # Extract trust only for the newly suggested rankings
+      start_new <- ncol(r_all) + 1
+      end_new   <- ncol(r_combined)
+      trust_new <- trust_cols[start_new:end_new]
+      
+      for (j in seq_along(ids_used)) {
+        
+        pid <- ids_used[j]
+        trust_value <- trust_new[j]
+        
+        if (duplication_count[pid] < k) {
+          if (runif(1) < trust_value) {
+            r_all <- cbind(r_all, r_original[, pid, drop = FALSE])
+            col_process_id <- c(col_process_id, pid)
+            duplication_count[pid] <- duplication_count[pid] + 1
+          }
+        }
+      }
+      
+      tau_true[i] <- kendall_tau(r$good$true_rank, post_now)
+      spear_true[i] <- spearman_corr(r$good$true_rank, post_now)
+    }
+    
+    avg_tau_true[round] <- mean(tau_true, na.rm = TRUE)
+    avg_spear_true[round] <- mean(spear_true, na.rm = TRUE)
   }
   
+  return(list(
+    tau = avg_tau_true,
+    spearman = avg_spear_true
+  ))
+}
