@@ -1,2 +1,4 @@
 # Thesis-F25
-Bayesian Consensus
+Student: Chadi Bsila
+Thesis Advisors: Hammurabi Mendes and Kevin Wang
+Topic: Byzantine Rank Aggregation
