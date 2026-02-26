@@ -263,8 +263,7 @@ sim_rounds <- function(r,
             r_all <- cbind(r_all, current_rankings[, pid, drop = FALSE])
             col_process_id <- c(col_process_id, pid)
             
-            new_col_index <- ncol(r_all)
-            duplication_queue[[pid]] <- c(duplication_queue[[pid]], new_col_index)
+            duplication_queue[[pid]] <- c(duplication_queue[[pid]], ncol(r_all))
             
             duplication_count[pid] <- duplication_count[pid] + 1
             
@@ -292,7 +291,7 @@ sim_rounds <- function(r,
         }
       }
       
-      # Store evolving good ranking
+      # Store aggregated ranking
       new_good_rankings[, i] <- post_now
       
       tau_true[i] <- kendall_tau(r$good$true_rank, post_now)
@@ -302,7 +301,7 @@ sim_rounds <- function(r,
     # Update good processes with their aggregated rankings
     current_rankings[, 1:n_good] <- new_good_rankings
     
-    # Bad processes remain arbitrary/random each round
+    # Bad processes remain random each round (simplest model for adversary behavior)
     for (j in 1:n_bad) {
       current_rankings[, n_good + j] <- sample(1:nrow(r_original))
     }
