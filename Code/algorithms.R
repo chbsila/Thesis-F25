@@ -202,11 +202,18 @@ sim_rounds <- function(r,
   n_processes <- n_good + n_bad
   
   r_original <- cbind(r$good$r, r$bad$r)
-  r_all <- r_original
+  
+  # Start evolving rankings
+  current_rankings <- r_original
+  r_all <- current_rankings
   
   col_process_id <- 1:n_processes
   
   duplication_count <- rep(0, n_processes)
+  duplication_queue <- vector("list", n_processes)
+  for (pid in 1:n_processes) {
+    duplication_queue[[pid]] <- which(col_process_id == pid)
+  }
   
   avg_tau_true <- numeric(number_of_rounds)
   avg_spear_true <- numeric(number_of_rounds)
@@ -220,12 +227,12 @@ sim_rounds <- function(r,
     tau_true <- numeric(n_good)
     spear_true <- numeric(n_good)
     
+    new_good_rankings <- matrix(NA, nrow = nrow(r_original), ncol = n_good)
+    
     for (i in 1:n_good) {
       
       ids_used <- which(network[i, ] == 1)
-      
-      # Suggested rankings from processes heard
-      r_new <- r_original[, ids_used, drop = FALSE]
+      r_new <- current_rankings[, ids_used, drop = FALSE]
       
       # Run BiGER on everything so far + new suggestions
       r_combined <- cbind(r_all, r_new)
@@ -234,12 +241,11 @@ sim_rounds <- function(r,
       post_now <- rank(-ra$mu)
       sigmas <- ra$sigma2
       
-      # Normalize 
-
+      # Normalize trust
       sigmas_norm <- (sigmas - min(sigmas)) / (max(sigmas) - min(sigmas))
       trust_cols <- 1 - sigmas_norm
     
-      # Extract trust only for the newly suggested rankings
+      # Extract trust only for newly suggested rankings
       start_new <- ncol(r_all) + 1
       end_new   <- ncol(r_combined)
       trust_new <- trust_cols[start_new:end_new]
@@ -249,17 +255,56 @@ sim_rounds <- function(r,
         pid <- ids_used[j]
         trust_value <- trust_new[j]
         
-        if (duplication_count[pid] < k) {
-          if (runif(1) < trust_value) {
-            r_all <- cbind(r_all, r_original[, pid, drop = FALSE])
+        if (runif(1) < trust_value) {
+          
+          # If under cap → just add
+          if (duplication_count[pid] < k) {
+            
+            r_all <- cbind(r_all, current_rankings[, pid, drop = FALSE])
             col_process_id <- c(col_process_id, pid)
+            
+            new_col_index <- ncol(r_all)
+            duplication_queue[[pid]] <- c(duplication_queue[[pid]], new_col_index)
+            
             duplication_count[pid] <- duplication_count[pid] + 1
+            
+          } else {
+          
+            oldest_col <- duplication_queue[[pid]][1]
+            
+            # Remove column
+            r_all <- r_all[, -oldest_col, drop = FALSE]
+            col_process_id <- col_process_id[-oldest_col]
+            
+            # Adjust all stored indices after column removal
+            for (p in 1:n_processes) {
+              duplication_queue[[p]] <- duplication_queue[[p]][duplication_queue[[p]] != oldest_col]
+              duplication_queue[[p]][duplication_queue[[p]] > oldest_col] <-
+                duplication_queue[[p]][duplication_queue[[p]] > oldest_col] - 1
+            }
+            
+            r_all <- cbind(r_all, current_rankings[, pid, drop = FALSE])
+            col_process_id <- c(col_process_id, pid)
+            
+            new_col_index <- ncol(r_all)
+            duplication_queue[[pid]] <- c(duplication_queue[[pid]][-1], new_col_index)
           }
         }
       }
       
+      # Store evolving good ranking
+      new_good_rankings[, i] <- post_now
+      
       tau_true[i] <- kendall_tau(r$good$true_rank, post_now)
       spear_true[i] <- spearman_corr(r$good$true_rank, post_now)
+    }
+    
+    # Update good processes with their aggregated rankings
+    current_rankings[, 1:n_good] <- new_good_rankings
+    
+    # Bad processes remain arbitrary/random each round
+    for (j in 1:n_bad) {
+      current_rankings[, n_good + j] <- sample(1:nrow(r_original))
     }
     
     avg_tau_true[round] <- mean(tau_true, na.rm = TRUE)
