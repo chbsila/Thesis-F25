@@ -51,7 +51,7 @@ run_experiment <- function(n_items = 50,
                            total_processes = 301,
                            reps = 100) {
   
-  intersections <- c("A","B","C")
+  intersections <- c("A", "A'", "B","C", "C'")
   results_df <- data.frame()
   
   for (int in intersections) {
