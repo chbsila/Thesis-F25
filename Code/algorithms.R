@@ -143,7 +143,7 @@ intersection_model_B <- function(n_good, n_bad){
     
     # Copy all of this sample's initial messages
     for (s in S_i){
-      # Copy their messages from initial network into network[i,]
+      network[i, ] <- pmax(network[i, ], initial_network[s, ])
     }
   }
   
