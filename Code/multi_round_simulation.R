@@ -2,6 +2,7 @@ library(BiGER)
 library(ggplot2)
 library(reshape2)
 library(dplyr)
+library(coda)
 
 # Load your algorithm definitions
 source("~/Desktop/Thesis 25 CB/algorithms.R")
@@ -19,19 +20,16 @@ run_experiment <- function(intersections = c("A", "A'", "B", "C", "C'"),
   if (!is.null(seed)) set.seed(seed)
   
   results_df <- data.frame()
+  gelman_df  <- data.frame()
   
   for (intersection in intersections) {
     for (k in k_values) {
       for (rep in 1:repetitions) {
         
-        cat("Running Model", intersection,
-            "| k =", k,
-            "| Rep =", rep, "\n")
+        cat("Running Model", intersection, "| k =", k, "| Rep =", rep, "\n")
         
-        # Generate fresh ranking data
         r <- sim_ranking(n_good, n_bad, n_items)
         
-        # Run multi-round simulation
         out <- sim_rounds(
           r = r,
           number_of_rounds = max_rounds,
@@ -39,12 +37,8 @@ run_experiment <- function(intersections = c("A", "A'", "B", "C", "C'"),
           k = k
         )
         
-        # Choose metric
-        metric_values <- if (metric == "kendall") {
-          out$tau
-        } else {
-          out$spearman
-        }
+        # Metric values
+        metric_values <- if (metric == "kendall") out$tau else out$spearman
         
         df_temp <- data.frame(
           Round = 1:max_rounds,
@@ -55,12 +49,34 @@ run_experiment <- function(intersections = c("A", "A'", "B", "C", "C'"),
         )
         
         results_df <- rbind(results_df, df_temp)
+        
+        if (repetitions == 1) {
+          history_tau <- out$history_tau
+          n_rounds <- length(history_tau)
+          
+          # MCMC 
+          tau_matrix <- matrix(NA, nrow = n_rounds, ncol = n_good)
+          for (r_idx in 1:n_rounds) tau_matrix[r_idx, ] <- history_tau[[r_idx]]
+          chains_list <- lapply(1:n_good, function(i) mcmc(tau_matrix[, i]))
+          chains_mcmc <- mcmc.list(chains_list)
+          psrf <- gelman.diag(chains_mcmc, autoburnin = FALSE)$psrf
+          
+          gelman_df <- rbind(gelman_df,
+                             data.frame(
+                               Intersection = intersection,
+                               k = k,
+                               PSRF_mean = mean(psrf[,1]),
+                               PSRF_max  = max(psrf[,1])
+                             ))
+        }
       }
     }
   }
   
-  return(results_df)
+  return(list(results_df = results_df,
+              gelman_df  = gelman_df))
 }
+
 
 ############################################################
 # AGGREGATE RESULTS (Mean + Confidence Intervals)
@@ -134,25 +150,21 @@ plot_results <- function(summary_df,
 ############################################################
 
 set.seed(1)
-
-results <- run_experiment(
-  intersections = c("A, B, C, A', C'"), # add B, C
-  k_values = 10:10,
+experiment_output <- run_experiment(
+  intersections = c("A"),
+  k_values = 10,
   n_good = 201,
   n_bad  = 100,
   n_items = 50,
   max_rounds = 50,
-  repetitions = 30,     
+  repetitions = 1,   # Gelman-Rubin will run
   metric = "kendall",
   seed = 1
 )
 
-summary_df <- aggregate_results(results)
+summary_df <- aggregate_results(experiment_output$results_df)
+p <- plot_results(summary_df, metric = "kendall")
+print(p)
 
-p <- plot_results(summary_df,
-                  metric = "kendall",
-                  min_round = 2,
-                  show_ci = FALSE,
-                  facet = TRUE)
-
-print(p) 
+gelman_df <- experiment_output$gelman_df
+print(gelman_df)
