@@ -307,6 +307,8 @@ sim_rounds <- function(r,
   
   avg_tau_true <- numeric(number_of_rounds)
   avg_spear_true <- numeric(number_of_rounds)
+  tau_convergence <- vector("list", number_of_rounds)
+  spearman_convergence <- vector("list", number_of_rounds)
   
   for (round in 1:number_of_rounds) {
     
@@ -399,12 +401,16 @@ sim_rounds <- function(r,
       current_rankings[, n_good + j] <- sample(1:nrow(r_original))
     }
     
+    tau_convergence[round] <- tau_true
+    spearman_convergence[round] <- spear_true
     avg_tau_true[round] <- mean(tau_true, na.rm = TRUE)
     avg_spear_true[round] <- mean(spear_true, na.rm = TRUE)
   }
   
   return(list(
     tau = avg_tau_true,
-    spearman = avg_spear_true
+    spearman = avg_spear_true,
+    history_tau = tau_convergence,
+    history_spearman = spearman_convergence
   ))
 }
